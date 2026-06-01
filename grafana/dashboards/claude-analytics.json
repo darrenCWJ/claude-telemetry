@@ -1,0 +1,320 @@
+{
+  "annotations": { "list": [] },
+  "description": "Claude Code usage analytics — cost, tokens, cache efficiency, per-session breakdown, models, projects, tools, and errors. Costs shown in SGD by default; use the Currency toggle (top-left) to switch to USD, and the rate box to adjust the exchange rate. Hover the ℹ on any panel for query details.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 1, "title": "Overview", "type": "row" },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Total estimated spend in USD across all sessions in the time range.\n\nSource: otel_metrics_sum, MetricName='claude_code.cost.usage'.\nEmitted by the Stop hook as a per-turn delta (cost of newly-completed turns), so the sum here is the true total.\nShown in the selected Currency (SGD by default, converted from USD at the rate box). Underlying API pricing per M tokens — Opus $15/$75, Sonnet $3/$15, Haiku $0.8/$4 (input/output); cache-read ~10× cheaper, cache-write 1.25× (5m) or 2× (1h).\n\nThresholds (SGD): Green <50 · Yellow 50–150 · Red >150",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 2, "noValue": "No data", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 150 }] }, "unit": "currencyUSD" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 0, "y": 1 }, "id": 2,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT sum(Value) * if('${currency:text}'='SGD', ${fx}, 1) AS cost FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Total Cost (${currency:text})", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Fresh input tokens billed at full input price (NOT served from cache).\n\nWhat counts as INPUT: your message, the system prompt + CLAUDE.md/rules, and any conversation prefix that was NOT a cache hit. Tool results (file reads, command output) also enter as input on the next turn.\n\nThis is the part of your context you pay FULL price for. Compare against Cache Read — a healthy session has cache-read >> input.\n\nSource: token.usage, token_type='input'.",
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "decimals": 0, "noValue": "No data", "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 3, "y": 1 }, "id": 3,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT sum(Value) AS tokens FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND Attributes['token_type'] = 'input' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Input (uncached)", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Output tokens Claude generated (text responses + tool-call requests + thinking).\n\nOutput is the most expensive token type — 5× input price on every model. Despite being lower in volume it often drives a large share of cost.\n\nSource: token.usage, token_type='output'.",
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "purple" }, "decimals": 0, "noValue": "No data", "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 6, "y": 1 }, "id": 4,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT sum(Value) AS tokens FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND Attributes['token_type'] = 'output' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Output", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Tokens served FROM the prompt cache at ~10× lower price than input.\n\nHigh cache-read is GOOD — it means Claude reused the cached context prefix instead of re-paying full input price. Claude Code keeps a stable cacheable prefix (system prompt + history) so most of your context is re-served from cache within a session.\n\nSource: token.usage, token_type='cacheRead'. Exact counts from the Anthropic API.",
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" }, "decimals": 0, "noValue": "No data", "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 9, "y": 1 }, "id": 17,
+      "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT sum(Value) AS tokens FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND Attributes['token_type'] = 'cacheRead' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Cache Read", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Share of input-side tokens served from cache: cacheRead / (input + cacheRead + cacheCreation) × 100.\n\nTHIS ANSWERS: \"Am I managing my cache, or re-feeding fresh context every turn?\"\n• >85% — excellent. You respond within the 5-min cache TTL and reuse a stable context prefix.\n• 50–85% — decent reuse, some cache misses (long pauses or context churn).\n• <50% — poor. Either long idle gaps (cache expired, TTL=5 min) or you keep changing early context / starting new tasks that invalidate the cached prefix, forcing full re-reads.\n\nEvery point of cache hit saves ~90% on that token vs full input price.\n\nSource: token.usage. Exact API counts.\n\nRed <50% · Yellow 50–85% · Green >85%",
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1, "noValue": "No data", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 50 }, { "color": "green", "value": 85 }] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 1 }, "id": 11,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT if(sumIf(Value, Attributes['token_type'] IN ('input','cacheRead','cacheCreation')) = 0, null, round(sumIf(Value, Attributes['token_type'] = 'cacheRead') / sumIf(Value, Attributes['token_type'] IN ('input','cacheRead','cacheCreation')) * 100, 1)) AS cache_hit_pct FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Cache Hit Rate", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Distinct Claude Code sessions in the time range (one session = one conversation).\n\nSource: distinct session_id on the claude_code.* metrics.",
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "text" }, "decimals": 0, "noValue": "No data", "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 1 }, "id": 5,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT countDistinct(Attributes['session_id']) AS sessions FROM otel.otel_metrics_sum WHERE MetricName LIKE 'claude_code.%' AND Attributes['session_id'] != '' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Sessions", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Average spend per session = Total Cost / distinct sessions.\n\nA high average means long sessions or heavy use of expensive models (Opus). Drill into the Sessions table below to see the outliers.\n\nGreen <$2 · Yellow $2–8 · Red >$8",
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "decimals": 2, "noValue": "No data", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 4 }, { "color": "red", "value": 12 }] }, "unit": "currencyUSD" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 18, "y": 1 }, "id": 18,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT round(sumIf(Value, MetricName='claude_code.cost.usage') / nullIf(countDistinct(Attributes['session_id']),0) * if('${currency:text}'='SGD', ${fx}, 1), 4) AS avg_cost FROM otel.otel_metrics_sum WHERE MetricName LIKE 'claude_code.%' AND Attributes['session_id'] != '' AND $__timeFilter(TimeUnix)", "refId": "A" }],
+      "title": "Avg Cost / Session (${currency:text})", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Average session wall-clock duration (first to last activity, including idle gaps).\n\nSource: claude_code.session.duration, derived from transcript timestamps. Averaged over the per-session maximum.\n\nNote: this is calendar span, not active compute time — a session left open shows a long span.",
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "blue" }, "decimals": 1, "noValue": "No data", "unit": "m" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 3, "x": 21, "y": 1 }, "id": 40,
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "center", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT round(avg(d)/60, 1) AS avg_dur_min FROM (SELECT sum(Value) AS d FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.session.duration' AND $__timeFilter(TimeUnix) GROUP BY Attributes['session_id'])", "refId": "A" }],
+      "title": "Avg Duration", "type": "stat"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Daily spend by model. Each band = one model's cost that day.\n\nSource: cost.usage grouped by model + day. Model ids shortened (Opus 4.8, Sonnet 4.6, Haiku 4.5).\n\nLook for: spikes on heavy-Opus days (Opus is 5× Sonnet per token).",
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 18, "gradientMode": "opacity", "stacking": { "mode": "normal", "group": "A" }, "showPoints": "never" }, "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 }, "id": 6,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 1, "rawSql": "SELECT toStartOfDay(TimeUnix) AS t, round(sumIf(Value, Attributes['model'] LIKE '%opus%') * if('${currency:text}'='SGD', ${fx}, 1),4) AS \"Opus\", round(sumIf(Value, Attributes['model'] LIKE '%sonnet%') * if('${currency:text}'='SGD', ${fx}, 1),4) AS \"Sonnet\", round(sumIf(Value, Attributes['model'] LIKE '%haiku%') * if('${currency:text}'='SGD', ${fx}, 1),4) AS \"Haiku\" FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' AND $__timeFilter(TimeUnix) GROUP BY t ORDER BY t ASC", "refId": "A" }],
+      "title": "Daily Cost by Model (${currency:text})", "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Daily token consumption stacked by type.\n\ninput = fresh tokens at full price · output = generated · cacheRead = reused from cache (cheap) · cacheCreation = written to cache.\n\nLook for: a large green cacheRead band relative to input = efficient cache reuse = lower cost.",
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 1, "fillOpacity": 18, "gradientMode": "opacity", "stacking": { "mode": "normal", "group": "A" }, "showPoints": "never" }, "unit": "short", "decimals": 0 }, "overrides": [
+        { "matcher": { "id": "byName", "options": "cacheRead" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+        { "matcher": { "id": "byName", "options": "input" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+        { "matcher": { "id": "byName", "options": "output" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "purple" } }] },
+        { "matcher": { "id": "byName", "options": "cacheCreation" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+      ] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 }, "id": 7,
+      "options": { "tooltip": { "mode": "multi", "sort": "desc" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["sum"] } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 1, "rawSql": "SELECT toStartOfDay(TimeUnix) AS t, sumIf(Value, Attributes['token_type']='input') AS \"input\", sumIf(Value, Attributes['token_type']='output') AS \"output\", sumIf(Value, Attributes['token_type']='cacheRead') AS \"cacheRead\", sumIf(Value, Attributes['token_type']='cacheCreation') AS \"cacheCreation\" FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND $__timeFilter(TimeUnix) GROUP BY t ORDER BY t ASC", "refId": "A" }],
+      "title": "Token Usage Over Time", "type": "timeseries"
+    },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 }, "id": 8, "title": "Models & Cache Efficiency", "type": "row" },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Spend share per model — which model eats the budget.\n\nOne colored slice per model, with USD value and % in the legend.\nSource: cost.usage grouped by model.\n\nNote: if only one slice shows, only one model was used in the selected time range — widen the range to compare models. Subagents (Task tool) that run on a different model appear as their own slice.",
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 14 }, "id": 9,
+      "options": { "pieType": "donut", "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] }, "displayLabels": ["percent"], "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "/^cost$/" } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT multiIf(Attributes['model']='claude-opus-4-8','Opus 4.8',Attributes['model']='claude-opus-4-7','Opus 4.7',Attributes['model']='claude-sonnet-4-6','Sonnet 4.6',Attributes['model'] LIKE '%haiku%','Haiku 4.5',Attributes['model'] LIKE '%opus%','Opus',Attributes['model'] LIKE '%sonnet%','Sonnet',Attributes['model']='','unknown',Attributes['model']) AS model, round(sum(Value) * if('${currency:text}'='SGD', ${fx}, 1),2) AS cost FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' AND Attributes['model'] != '' AND $__timeFilter(TimeUnix) GROUP BY model ORDER BY cost DESC", "refId": "A" }],
+      "title": "Cost by Model (${currency:text})", "type": "piechart"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Token volume share per model (all token types).\n\nOne colored slice per model, with token count and % in the legend.\nSource: token.usage grouped by model.\n\nNote: volume ≠ cost — Opus tokens cost 5× Sonnet, so compare with Cost by Model. A single slice means one model in range.",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 14 }, "id": 10,
+      "options": { "pieType": "donut", "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] }, "displayLabels": ["percent"], "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "/^tokens$/" } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT multiIf(Attributes['model']='claude-opus-4-8','Opus 4.8',Attributes['model']='claude-opus-4-7','Opus 4.7',Attributes['model']='claude-sonnet-4-6','Sonnet 4.6',Attributes['model'] LIKE '%haiku%','Haiku 4.5',Attributes['model'] LIKE '%opus%','Opus',Attributes['model'] LIKE '%sonnet%','Sonnet',Attributes['model']='','unknown',Attributes['model']) AS model, sum(Value) AS tokens FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND Attributes['model'] != '' AND $__timeFilter(TimeUnix) GROUP BY model ORDER BY tokens DESC", "refId": "A" }],
+      "title": "Tokens by Model", "type": "piechart"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Input-side token composition: how much of your context was served from cache vs paid fresh.\n\ncacheRead (green) = reused cheaply · input (blue) = fresh full-price · cacheCreation (orange) = one-time cache writes.\n\nA chart dominated by green cacheRead = you are managing cache well. A large blue/orange share = you are re-feeding fresh context (new tasks, long pauses past the 5-min TTL, or changing early context).",
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [
+        { "matcher": { "id": "byName", "options": "cacheRead (reused)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+        { "matcher": { "id": "byName", "options": "input (fresh)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+        { "matcher": { "id": "byName", "options": "cacheCreation (write)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+      ] },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 14 }, "id": 12,
+      "options": { "pieType": "donut", "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] }, "displayLabels": ["percent"], "reduceOptions": { "values": true, "calcs": ["lastNotNull"], "fields": "/^tokens$/" } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT multiIf(Attributes['token_type']='cacheRead','cacheRead (reused)',Attributes['token_type']='input','input (fresh)',Attributes['token_type']='cacheCreation','cacheCreation (write)',Attributes['token_type']) AS type, sum(Value) AS tokens FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.token.usage' AND Attributes['token_type'] IN ('input','cacheRead','cacheCreation') AND $__timeFilter(TimeUnix) GROUP BY type ORDER BY tokens DESC", "refId": "A" }],
+      "title": "Input Composition (cache vs fresh)", "type": "piechart"
+    },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 }, "id": 19, "title": "Sessions — cost · tokens · cache · duration", "type": "row" },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Every session ranked by cost, with everything you need to spot expensive sessions and judge cache health.\n\nColumns:\n• session — first 8 chars of the session id\n• project — working-directory name\n• model — primary model used\n• cost — total USD for the session\n• input / output / cache_read — token counts\n• cache% — cacheRead / (input+cacheRead+cacheCreation). HIGH = good reuse; LOW = re-feeding fresh context each turn\n• duration — wall-clock span (first→last activity, incl. idle)\n• ended — last activity time\n\nSource: joins cost.usage, token.usage, and session.duration by session_id (all keyed on the same id).\nSort any column; sorted by cost by default. Red cost cells = the budget hogs.",
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "align": "left", "filterable": true } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "session" }, "properties": [{ "id": "custom.width", "value": 90 }] },
+          { "matcher": { "id": "byName", "options": "project" }, "properties": [{ "id": "custom.width", "value": 170 }] },
+          { "matcher": { "id": "byName", "options": "model" }, "properties": [{ "id": "custom.width", "value": 95 }] },
+          { "matcher": { "id": "byName", "options": "cost" }, "properties": [{ "id": "unit", "value": "currencyUSD" }, { "id": "decimals", "value": 3 }, { "id": "custom.width", "value": 100 }, { "id": "custom.align", "value": "right" }, { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 15 }] } }, { "id": "color", "value": { "mode": "thresholds" } }] },
+          { "matcher": { "id": "byName", "options": "input" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 90 }, { "id": "custom.align", "value": "right" }] },
+          { "matcher": { "id": "byName", "options": "output" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 90 }, { "id": "custom.align", "value": "right" }] },
+          { "matcher": { "id": "byName", "options": "cache_read" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 100 }, { "id": "custom.align", "value": "right" }] },
+          { "matcher": { "id": "byName", "options": "cache_pct" }, "properties": [{ "id": "unit", "value": "percent" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 90 }, { "id": "custom.align", "value": "right" }, { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "gradient" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 50 }, { "color": "green", "value": 85 }] } }, { "id": "color", "value": { "mode": "thresholds" } }] },
+          { "matcher": { "id": "byName", "options": "duration" }, "properties": [{ "id": "unit", "value": "m" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 100 }, { "id": "custom.align", "value": "right" }] },
+          { "matcher": { "id": "byName", "options": "ended" }, "properties": [{ "id": "custom.width", "value": 160 }] }
+        ]
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 22 }, "id": 24,
+      "options": { "footer": { "show": true, "reducer": ["sum"], "fields": ["cost"] }, "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "cost", "desc": true }] },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT substring(Attributes['session_id'],1,8) AS session, any(Attributes['project']) AS project, multiIf(anyIf(Attributes['model'], MetricName='claude_code.cost.usage')='claude-opus-4-8','Opus 4.8',anyIf(Attributes['model'], MetricName='claude_code.cost.usage')='claude-sonnet-4-6','Sonnet 4.6',anyIf(Attributes['model'], MetricName='claude_code.cost.usage') LIKE '%opus%','Opus',anyIf(Attributes['model'], MetricName='claude_code.cost.usage') LIKE '%haiku%','Haiku',anyIf(Attributes['model'], MetricName='claude_code.cost.usage') LIKE '%sonnet%','Sonnet',anyIf(Attributes['model'], MetricName='claude_code.cost.usage')) AS model, round(sumIf(Value, MetricName='claude_code.cost.usage') * if('${currency:text}'='SGD', ${fx}, 1),4) AS cost, toUInt64(sumIf(Value, MetricName='claude_code.token.usage' AND Attributes['token_type']='input')) AS input, toUInt64(sumIf(Value, MetricName='claude_code.token.usage' AND Attributes['token_type']='output')) AS output, toUInt64(sumIf(Value, MetricName='claude_code.token.usage' AND Attributes['token_type']='cacheRead')) AS cache_read, round(sumIf(Value, MetricName='claude_code.token.usage' AND Attributes['token_type']='cacheRead') / nullIf(sumIf(Value, MetricName='claude_code.token.usage' AND Attributes['token_type'] IN ('input','cacheRead','cacheCreation')),0)*100,0) AS cache_pct, round(sumIf(Value, MetricName='claude_code.session.duration')/60,1) AS duration, formatDateTime(max(TimeUnix), '%Y-%m-%d %H:%M') AS ended FROM otel.otel_metrics_sum WHERE MetricName LIKE 'claude_code.%' AND Attributes['session_id'] != '' AND $__timeFilter(TimeUnix) GROUP BY Attributes['session_id'] ORDER BY cost DESC LIMIT 100", "refId": "A" }],
+      "title": "Sessions by Cost (${currency:text})", "type": "table"
+    },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 34 }, "id": 20, "title": "Projects", "type": "row" },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Total cost per project (working-directory name). Which codebases drive spend.\n\nSource: cost.usage grouped by project.",
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2, "color": { "mode": "continuous-BlPu" } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 35 }, "id": 21,
+      "options": { "orientation": "horizontal", "xTickLabelRotation": 0, "barWidth": 0.7, "fillOpacity": 85, "showValue": "always", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT Attributes['project'] AS project, round(sum(Value) * if('${currency:text}'='SGD', ${fx}, 1),3) AS cost FROM otel.otel_metrics_sum WHERE MetricName = 'claude_code.cost.usage' AND Attributes['project'] != '' AND $__timeFilter(TimeUnix) GROUP BY project ORDER BY cost DESC LIMIT 15", "refId": "A" }],
+      "title": "Cost by Project (${currency:text})", "type": "barchart"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Tool-call volume per project — how much work Claude did in each codebase.\n\nSource: otel_logs, project_name on every tool-call log. Combine with Cost by Project for cost-efficiency.\n\nNote: only projects whose hook captured tool logs appear here.",
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "continuous-GrYlRd" } }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 35 }, "id": 22,
+      "options": { "orientation": "horizontal", "xTickLabelRotation": 0, "barWidth": 0.7, "fillOpacity": 85, "showValue": "always", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT LogAttributes['project_name'] AS project, count() AS tool_calls FROM otel.otel_logs WHERE ServiceName = 'claude-code' AND mapContains(LogAttributes, 'tool_name') AND LogAttributes['project_name'] != '' AND $__timeFilter(Timestamp) GROUP BY project ORDER BY tool_calls DESC LIMIT 15", "refId": "A" }],
+      "title": "Tool Calls by Project", "type": "barchart"
+    },
+
+    { "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 }, "id": 27, "title": "Tools & Errors", "type": "row" },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Top 15 tools by call count, with average duration and error rate.\n\nSource: otel_logs aggregated by tool_name.\nLook for high avg_ms on Bash (slow commands) or high error_rate (permission/timeout issues).",
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "align": "left" } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "tool" }, "properties": [{ "id": "custom.width", "value": 240 }] },
+        { "matcher": { "id": "byName", "options": "calls" }, "properties": [{ "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 80 }, { "id": "custom.align", "value": "right" }] },
+        { "matcher": { "id": "byName", "options": "avg_ms" }, "properties": [{ "id": "unit", "value": "ms" }, { "id": "decimals", "value": 0 }, { "id": "custom.width", "value": 100 }, { "id": "custom.align", "value": "right" }] },
+        { "matcher": { "id": "byName", "options": "error_rate" }, "properties": [{ "id": "unit", "value": "percentunit" }, { "id": "decimals", "value": 1 }, { "id": "custom.width", "value": 100 }, { "id": "custom.align", "value": "right" }, { "id": "custom.cellOptions", "value": { "type": "color-background", "mode": "basic" } }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.05 }, { "color": "red", "value": 0.15 }] } }, { "id": "color", "value": { "mode": "thresholds" } }] }
+      ] },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 44 }, "id": 13,
+      "options": { "footer": { "show": false }, "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "calls", "desc": true }] },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT LogAttributes['tool_name'] AS tool, count() AS calls, round(avg(toFloat64OrZero(LogAttributes['duration_ms'])), 0) AS avg_ms, round(countIf(LogAttributes['error'] = 'true') / count(), 3) AS error_rate FROM otel.otel_logs WHERE ServiceName = 'claude-code' AND mapContains(LogAttributes, 'tool_name') AND $__timeFilter(Timestamp) GROUP BY tool ORDER BY calls DESC LIMIT 15", "refId": "A" }],
+      "title": "Top Tools (calls · avg ms · error rate)", "type": "table"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Hourly error-rate trend — percent of tool calls that failed each hour.\n\nSource: otel_logs, countIf(error='true')/count() per hour.\nSustained >15% suggests a systemic problem (permissions, timeouts, unreachable MCP server).",
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 12, "gradientMode": "opacity", "showPoints": "never" }, "unit": "percent", "decimals": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 15 }] }, "color": { "mode": "thresholds" } }, "overrides": [] },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 44 }, "id": 29,
+      "options": { "tooltip": { "mode": "single" }, "legend": { "showLegend": false } },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 1, "rawSql": "SELECT toStartOfHour(Timestamp) AS t, round(countIf(LogAttributes['error'] = 'true') / count() * 100, 1) AS error_rate_pct FROM otel.otel_logs WHERE ServiceName = 'claude-code' AND mapContains(LogAttributes, 'tool_name') AND $__timeFilter(Timestamp) GROUP BY t ORDER BY t ASC", "refId": "A" }],
+      "title": "Error Rate Over Time (%)", "type": "timeseries"
+    },
+
+    {
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+      "description": "Most recent failed tool calls with the error detail from the tool output.\n\nSource: otel_logs where error='true'. Common causes: 'Permission denied', 'timeout', 'not found', 'ECONNREFUSED'.",
+      "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [
+        { "matcher": { "id": "byName", "options": "time" }, "properties": [{ "id": "custom.width", "value": 160 }] },
+        { "matcher": { "id": "byName", "options": "tool" }, "properties": [{ "id": "custom.width", "value": 110 }] },
+        { "matcher": { "id": "byName", "options": "project" }, "properties": [{ "id": "custom.width", "value": 150 }] },
+        { "matcher": { "id": "byName", "options": "error_detail" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto", "wrapText": true } }] }
+      ] },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 53 }, "id": 31,
+      "options": { "footer": { "show": false }, "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "time", "desc": true }] },
+      "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT Timestamp AS time, LogAttributes['tool_name'] AS tool, substring(LogAttributes['session_id'], 1, 8) AS session, LogAttributes['project_name'] AS project, substring(LogAttributes['tool_output'], 1, 300) AS error_detail FROM otel.otel_logs WHERE ServiceName = 'claude-code' AND LogAttributes['error'] = 'true' AND $__timeFilter(Timestamp) ORDER BY Timestamp DESC LIMIT 50", "refId": "A" }],
+      "title": "Recent Errors", "type": "table"
+    },
+
+    { "collapsed": true, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 62 }, "id": 32, "title": "Usage Patterns & Prompts", "type": "row", "panels": [
+
+      {
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+        "description": "Tool-call volume by hour of day (Asia/Kuala_Lumpur, GMT+8), summed across all days.\n\nSource: otel_logs, toHour(Timestamp). Shows when Claude Code is used most.",
+        "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#3B82F6" } }, "overrides": [] },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 63 }, "id": 33,
+        "options": { "orientation": "vertical", "xTickLabelRotation": 0, "barWidth": 0.8, "fillOpacity": 85, "showValue": "always", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+        "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT concat(leftPad(toString(hrs.h),2,'0'),':00') AS hour, toUInt64(c.cnt) AS tool_calls FROM (SELECT number AS h FROM numbers(24)) hrs LEFT JOIN (SELECT toHour(toTimeZone(Timestamp,'Asia/Kuala_Lumpur')) AS hh, count() AS cnt FROM otel.otel_logs WHERE ServiceName='claude-code' AND mapContains(LogAttributes,'tool_name') AND $__timeFilter(Timestamp) GROUP BY hh) c ON hrs.h = c.hh ORDER BY hrs.h ASC", "refId": "A" }],
+        "title": "Activity by Hour (GMT+8)", "type": "barchart"
+      },
+
+      {
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+        "description": "Prompt submissions by hour of day (GMT+8) — when you actively ask Claude things.\n\nSource: otel_logs where prompt is set (UserPromptSubmit hook).",
+        "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "#A855F7" } }, "overrides": [] },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 71 }, "id": 34,
+        "options": { "orientation": "vertical", "xTickLabelRotation": 0, "barWidth": 0.8, "fillOpacity": 85, "showValue": "always", "legend": { "showLegend": false }, "tooltip": { "mode": "single" } },
+        "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT concat(leftPad(toString(hrs.h),2,'0'),':00') AS hour, toUInt64(c.cnt) AS prompts FROM (SELECT number AS h FROM numbers(24)) hrs LEFT JOIN (SELECT toHour(toTimeZone(Timestamp,'Asia/Kuala_Lumpur')) AS hh, count() AS cnt FROM otel.otel_logs WHERE ServiceName='claude-code' AND mapContains(LogAttributes,'prompt') AND $__timeFilter(Timestamp) GROUP BY hh) c ON hrs.h = c.hh ORDER BY hrs.h ASC", "refId": "A" }],
+        "title": "Prompts by Hour (GMT+8)", "type": "barchart"
+      },
+
+      {
+        "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" },
+        "description": "Your most recent prompts, newest first — the primary way to see WHAT Claude is being used for.\n\nSource: otel_logs where prompt is set. Capped at 4000 chars at capture time.",
+        "fieldConfig": { "defaults": { "custom": { "align": "left" } }, "overrides": [
+          { "matcher": { "id": "byName", "options": "time" }, "properties": [{ "id": "custom.width", "value": 160 }] },
+          { "matcher": { "id": "byName", "options": "project" }, "properties": [{ "id": "custom.width", "value": 150 }] },
+          { "matcher": { "id": "byName", "options": "session" }, "properties": [{ "id": "custom.width", "value": 90 }] },
+          { "matcher": { "id": "byName", "options": "prompt" }, "properties": [{ "id": "custom.cellOptions", "value": { "type": "auto", "wrapText": true } }] }
+        ] },
+        "gridPos": { "h": 12, "w": 24, "x": 0, "y": 79 }, "id": 16,
+        "options": { "footer": { "show": false }, "showHeader": true, "cellHeight": "sm", "sortBy": [{ "displayName": "time", "desc": true }] },
+        "targets": [{ "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse_otel" }, "format": 0, "rawSql": "SELECT Timestamp AS time, LogAttributes['project_name'] AS project, substring(LogAttributes['session_id'], 1, 8) AS session, LogAttributes['prompt'] AS prompt FROM otel.otel_logs WHERE ServiceName = 'claude-code' AND mapContains(LogAttributes, 'prompt') AND LogAttributes['prompt'] != '' AND $__timeFilter(Timestamp) ORDER BY Timestamp DESC LIMIT 100", "refId": "A" }],
+        "title": "Recent Prompts", "type": "table"
+      }
+
+    ] }
+
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": ["claude", "telemetry", "ai"],
+  "templating": {
+    "list": [
+      {
+        "name": "currency",
+        "label": "Currency",
+        "description": "Display currency for all cost fields. SGD (default) converts USD costs at the rate on the right; USD shows raw API cost.",
+        "type": "custom",
+        "multi": false,
+        "includeAll": false,
+        "query": "SGD : currency:S$,USD : currencyUSD",
+        "current": { "text": "SGD", "value": "currency:S$" },
+        "options": [
+          { "text": "SGD", "value": "currency:S$", "selected": true },
+          { "text": "USD", "value": "currencyUSD", "selected": false }
+        ]
+      },
+      {
+        "name": "fx",
+        "label": "USD→SGD rate",
+        "description": "Exchange rate applied when Currency = SGD. Edit to match the current rate.",
+        "type": "textbox",
+        "query": "1.35",
+        "current": { "text": "1.35", "value": "1.35" },
+        "options": [ { "text": "1.35", "value": "1.35", "selected": true } ]
+      }
+    ]
+  },
+  "time": { "from": "now-30d", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Claude Usage Analytics",
+  "uid": "claude-analytics",
+  "version": 2
+}

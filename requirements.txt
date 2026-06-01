@@ -1,0 +1,8 @@
+# OTEL SDK + OTLP HTTP exporter (used by both hooks and the SDK wrapper)
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp-proto-http>=1.25.0
+opentelemetry-semantic-conventions>=0.46b0
+
+# Claude API SDK (for sdk/claude_otel.py instrumentation wrapper)
+anthropic>=0.30.0

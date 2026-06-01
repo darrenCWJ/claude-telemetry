@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "python \".claude/hooks/claude_hook.py\" prompt", "timeout": 8, "async": true }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "python \".claude/hooks/claude_hook.py\" pre", "timeout": 8, "async": true }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "python \".claude/hooks/claude_hook.py\" post", "timeout": 10, "async": true }]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [{ "type": "command", "command": "python \".claude/hooks/claude_hook.py\" stop", "timeout": 10, "async": true }]
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+# Secrets — never commit
+.env
+*.env.local
+
+# Backup / archive artifacts
+.claude.zip
+
+# Dashboard screenshots (working artifacts)
+dash*.png
+dashboard*.png
+
+# Tooling temp
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
